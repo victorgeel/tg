@@ -1,0 +1,17 @@
+{
+  "tasks": {
+    "get-session": "deno run --allow-net --allow-env --allow-read --allow-ffi generate_session.ts",
+    "run-bot": "deno run --allow-net --allow-env --allow-read --allow-write --allow-ffi main_bot.ts"
+  },
+  "nodeModulesDir": "auto", // Deno 2.0+ recommendation
+  "imports": {
+    "npm:telegram": "npm:telegram@2.26.22", // Your specified version
+    "jsr:@std/dotenv": "jsr:@std/dotenv@0.225.4", // Your specified version
+    "npm:@google/generative-ai": "npm:@google/generative-ai@^0.14.1" // Example version, check latest
+    // Add other npm/jsr imports if your main_bot.ts needs more
+  }
+  // "compilerOptions": {
+  //   "lib": ["deno.window", "deno.unstable"] // Add if prompt() or other unstable APIs are directly used
+  // }
+  }
+    
