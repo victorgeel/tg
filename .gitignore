@@ -1,0 +1,4 @@
+node_modules/
+.env
+.vscode/
+# Add any other local files/folders you don't want to commit
