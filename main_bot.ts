@@ -1,8 +1,10 @@
+// deno.ts -- combines main_bot.ts and generate_session.ts
+
 import { TelegramClient, Api } from "npm:telegram";
 import { StringSession } from "npm:telegram/sessions/index.js";
 import { NewMessage, NewMessageEvent } from "npm:telegram/events/index.js";
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold, GenerationConfig, Tool, Content } from "npm:@google/generative-ai";
-import "jsr:@std/dotenv@0.225.4/load"; // Auto-loads env for local dev
+import "jsr:@std/dotenv@0.225.4/load";
 
 // --- Configuration ---
 const API_ID_STR = Deno.env.get("TELEGRAM_API_ID");
@@ -12,7 +14,64 @@ const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 const ALLOWED_GROUP_ID_SETTING = Deno.env.get("ALLOWED_GROUP_ID") || "";
 const GEMINI_MODEL_NAME = Deno.env.get("GEMINI_MODEL_NAME") || "gemini-1.5-flash";
 
-// --- Validate ---
+// --- For session generation (if needed) ---
+async function generateSession() {
+  console.log("--- Telegram Session String Generation ---");
+  if (!API_ID_STR || !API_HASH) {
+    console.error("❌ TELEGRAM_API_ID and TELEGRAM_API_HASH must be set in the .env file.");
+    Deno.exit(1);
+  }
+  const apiId = parseInt(API_ID_STR);
+  if (isNaN(apiId)) {
+    console.error("❌ TELEGRAM_API_ID must be a number.");
+    Deno.exit(1);
+  }
+  const stringSession = new StringSession(""); // Empty for new session
+  const client = new TelegramClient(stringSession, apiId, API_HASH, { connectionRetries: 5 });
+  try {
+    await client.start({
+      phoneNumber: async () => {
+        const number = prompt("📞 Enter your phone number (e.g. +959...):");
+        if (!number || number.trim() === "") throw new Error("Phone number cannot be empty.");
+        return number.trim();
+      },
+      password: async () => prompt("🔑 Enter your Telegram password (2FA, press Enter if none):") || "",
+      phoneCode: async () => {
+        const code = prompt("💬 Enter the code you received via Telegram:");
+        if (!code || code.trim() === "") throw new Error("Phone code cannot be empty.");
+        return code.trim();
+      },
+      onError: (err: Error) => {
+        console.error("Login Error during client.start:", err.message || err);
+        if ((err as any).errorMessage === "SESSION_PASSWORD_NEEDED") {
+          console.error("Hint: A 2FA password is required for this account.");
+        }
+        if (err.stack) console.error("Error stack:", err.stack);
+      },
+    });
+    const generatedSession = client.session.save();
+    console.log("\n✅ New login successful!");
+    console.log("🔒 NEW TELEGRAM_SESSION_STRING (Copy this string):");
+    console.log("===================================================================");
+    console.log(generatedSession);
+    console.log("===================================================================");
+    console.log("🛑 Update your .env file with this new session string.");
+  } catch (error: any) {
+    console.error("💥 Failed to get session string:", error.message || error);
+  } finally {
+    if (client.connected) await client.disconnect();
+    console.log("--- Session generation finished ---");
+    Deno.exit(0);
+  }
+}
+
+// --- If no session string, generate and exit ---
+if (!SESSION_STRING) {
+  await generateSession();
+  // Will exit after generation.
+}
+
+// --- Validate bot config before running ---
 if (!API_ID_STR || !API_HASH || !SESSION_STRING || !GEMINI_API_KEY) {
   console.error("❌ FATAL_CONFIG: Missing critical environment variables: TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION_STRING, or GEMINI_API_KEY.");
   throw new Error("CRITICAL_ENV_VAR_MISSING_FOR_BOT");
@@ -26,7 +85,7 @@ console.log(`[CONFIG] Session string length: ${SESSION_STRING.length}`);
 console.log(`[CONFIG] ✅ Using Gemini Model: ${GEMINI_MODEL_NAME}`);
 console.log(`[CONFIG] ✅ Allowed Group ID Setting: '${ALLOWED_GROUP_ID_SETTING}'`);
 
-// --- Constants ---
+// --- Constants (copied from main_bot.ts) ---
 const MAX_HISTORY_LENGTH = 10;
 const GROUNDING_DAILY_QUOTA = 500;
 const GROUNDING_TOOL: Tool[] = [{ googleSearch: {} }];
@@ -34,20 +93,19 @@ const KV_QUOTA_COUNT_KEY = ["groundingQuotaCount_v_main_bot_final"];
 const KV_QUOTA_RESET_DATE_KEY = ["groundingQuotaResetDateMST_v_main_bot_final"];
 const CONVERSATION_KV_PREFIX = "personalConv_v_main_bot_final";
 
-const QUOTA_EXCEEDED_MESSAGE = "⚠️ တောင်းပန်ပါတယ်၊ ယနေ့အတွက် အချက်အလက်ရှာဖွေမှု (Grounding) Quota ပြည့်သွားပါပြီ။ သာမန်အဖြေကိုသာ ရရှိပါမည်။";
+const QUOTA_EXCEEDED_MESSAGE = "⚠️ တောင်းပန်ပါတယ်၊ ယနေ့အတွက် အချက်အလက်ရှာဖွေမှု (Grounding) Quota ပြည့်သွားပါပြီ။ မနက်ဖြန်နောက်ထပ်ရှာဖွေမှုများ ပြန်လည်အသုံးပြုနိုင်ပါလိမ့်မည်။";
 const GENERIC_ERROR_MESSAGE = "တောင်းပန်ပါတယ်၊ အကြောင်းပြန်ဖို့ အဆင်မပြေဖြစ်နေပါတယ်။";
-const KV_ERROR_MESSAGE = "⚠️ Internal error: မှတ်ဉာဏ် သို့မဟုတ် Quota အချက်အလက်ကို ရယူ/သိမ်းဆည်းရာတွင် အမှားဖြစ်ပွားနေပါသည်။";
-const SAFETY_BLOCK_MESSAGE = "တောင်းပန်ပါသည်။ ဤအကြောင်းအရာသည် လုံခြုံရေးအရ မသင့်လျော်ပါ။";
+const KV_ERROR_MESSAGE = "⚠️ Internal error: မှတ်ဉာဏ် သို့မဟုတ် Quota အချက်အလက်ကို ရယူ/သိမ်းဆည်းရာတွင် ပြဿနာတစ်ခု ဖြစ်ပေါ်နေသည်။";
+const SAFETY_BLOCK_MESSAGE = "တောင်းပန်ပါသည်။ ဤအကြောင်းအရာသည် လုံခြုံရေးအရ မသင့်လျော်ပါဟု Gemini မှတားမြစ်ထားပါသည်။";
 const BAD_REQUEST_MESSAGE = "Gemini API Error: မမှန်ကန်သော တောင်းဆိုမှု။";
 const RESET_CONFIRMATION_USER = "သင့်မှတ်ဉာဏ်ကို ရှင်းလင်းပြီးပါပြီ။";
 const RESET_ERROR = "⚠️ မှတ်ဉာဏ်ရှင်းလင်းရာတွင် အမှား ဖြစ်ပွားပါသည်။";
 const MEDIA_UNSUPPORTED_MESSAGE = "ℹ️ စာသား message များကိုသာ လက်ခံပါသည်။";
 
 const GROUNDING_KEYWORDS = [
-  "ရှာဖွေ", "နောက်ဆုံးရ", "latest", "search for", "ဘယ်လောက်လဲ", "ဘယ်မှာလဲ", "ဘယ်သူလဲ", "ဘယ်အချိန်က", "ဘာဖြစ်", "အကြောင်းပြ",
-  "အတည်ပြု", "update", "ရာသီဥတု", "သတင်း", "ဆိုတာဘာလဲ", "အဓိပ္ပါယ်", "အချက်အလက်", "စာရင်း", "စျေးနှုန်း", "ဘယ်နေရာ",
-  "ဘယ်လိုသွားရ", "ရှင်းပြပါ", "ဖြစ်နိုင်လား", "ရှိလား", "ဖွင့်လား", "ပိတ်လား", "ဘယ်နေ့", "define", "who is", "what is",
-  "where is", "how much", "how many", "confirm", "verify", "news"
+  "ရှာဖွေ", "နောက်ဆုံးရ", "latest", "search for", "ဘယ်လောက်လဲ", "ဘယ်မှာလဲ", "ဘယ်သူလဲ", "ဘယ်အချိန်လဲ",
+  "အတည်ပြု", "update", "ရာသီဥတု", "သတင်း", "ဆိုတာဘာလဲ", "အဓိပ္ပါယ်", "အချက်အလက်", "စာရင်း",
+  "ဘယ်လိုသွားရ", "ရှင်းပြပါ", "ဖြစ်နိုင်လား", "ရှိလား", "ဖွင့်လား", "ပိတ်လား", "ဘယ်လို", "where is", "how much", "how many", "confirm", "verify", "news"
 ];
 
 // --- Initialize Clients ---
@@ -178,14 +236,12 @@ async function getGeminiTextResponse(chatIdStr: string, userIdStr: string, text:
   let useGroundingTool = false;
   let quotaWarning = "";
   let history: GeminiHistoryItem[] = [];
-
   if (kv) {
     try {
       const historyEntry = await kv.get<GeminiHistoryItem[]>(kvHistoryKey);
       if (historyEntry?.value) history = historyEntry.value;
     } catch { }
   }
-
   try {
     if (isGroundingRequested(originalText)) {
       const quotaStatus = await getGroundingQuotaStatus();
@@ -194,7 +250,7 @@ async function getGeminiTextResponse(chatIdStr: string, userIdStr: string, text:
     }
     const newUserMessage: GeminiHistoryItem = { role: "user", parts: [{ text }] };
     const contentsPayload: Content[] = [...history, newUserMessage] as Content[];
-    const systemInstruction: Content = { role: "system", parts: [{ text: "သင်သည် မြန်မာဘာသာစကားကို အဓိကအသုံးပြုသော AI လက်ထောက်ဖြစ်သည်။ ဖော်ရွေပြီး၊ လူအများနားလည်လွယ်သော မြန်မာစကားကိုသုံးပါ။" }] };
+    const systemInstruction: Content = { role: "system", parts: [{ text: "သင်သည် မြန်မာဘာသာစကားကို အဓိကအသုံးပြုသော AI ဖြစ်သည်။" }] };
     const requestBody = {
       contents: contentsPayload,
       generationConfig: GEMINI_GENERATION_CONFIG_BOT,
@@ -291,7 +347,7 @@ async function handleNewMessage(event: NewMessageEvent): Promise<void> {
   }
 }
 
-// --- Start the Client ---
+// --- Start the Bot ---
 async function runBot() {
   // Initialize KV store here if not already done
   if (!kv) {
@@ -337,6 +393,4 @@ async function runBot() {
 }
 
 // --- Run the Bot ---
-runBot().catch(finalError => {
-  console.error("💥 UNHANDLED_ERROR_IN_RUN_BOT_FUNCTION:", finalError.message || finalError);
-});
+await runBot();
