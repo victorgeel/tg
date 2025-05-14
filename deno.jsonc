@@ -1,17 +1,24 @@
 {
+  // Deno task runner shortcuts
   "tasks": {
+    // Run this to generate a new Telegram session string interactively
     "get-session": "deno run --allow-net --allow-env --allow-read --allow-ffi generate_session.ts",
+    // Run this to start your main Telegram+Gemini bot
     "run-bot": "deno run --allow-net --allow-env --allow-read --allow-write --allow-ffi main_bot.ts"
   },
-  "nodeModulesDir": "auto", // Deno 2.0+ recommendation
+
+  // Let Deno automatically manage the node_modules directory for npm: imports
+  "nodeModulesDir": "auto",
+
+  // Import mappings for npm and jsr packages
   "imports": {
-    "npm:telegram": "npm:telegram@2.26.22", // Your specified version
-    "jsr:@std/dotenv": "jsr:@std/dotenv@0.225.4", // Your specified version
-    "npm:@google/generative-ai": "npm:@google/generative-ai@^0.14.1" // Example version, check latest
-    // Add other npm/jsr imports if your main_bot.ts needs more
+    "npm:telegram": "npm:telegram@2.26.22", // Telegram GramJS
+    "jsr:@std/dotenv": "jsr:@std/dotenv@0.225.4", // Deno STD dotenv
+    "npm:@google/generative-ai": "npm:@google/generative-ai@^0.14.1" // Gemini API
   }
+
+  // If you use unstable APIs (like Deno.prompt in the future), uncomment the section below:
   // "compilerOptions": {
-  //   "lib": ["deno.window", "deno.unstable"] // Add if prompt() or other unstable APIs are directly used
+  //   "lib": ["deno.window", "deno.unstable"]
   // }
-  }
-    
+}
